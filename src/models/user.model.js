@@ -33,13 +33,13 @@ const userSchema = new mongoose.Schema(
   }
 );
 // this will convert the password into hash and store it to the database
-userSchema.pre("save",async function(next){
+userSchema.pre("save",async function(){
     if(!this.isModified("password")){
-        return next()
+        return 
     }
     const hash=await bcrypt.hash(this.password,10)
     this.password=hash
-    return next()
+    return
 })
 // this will compare the passowrd stored in DB and the passwoed entet by the user
 
