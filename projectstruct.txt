@@ -1,2 +1,5 @@
 src folder mai most code of the project 
 2- in app.js-create the server instance and config it we will not start the server there
+
+
+Services folder contains all the third party services like email ,AI API's Storage all these

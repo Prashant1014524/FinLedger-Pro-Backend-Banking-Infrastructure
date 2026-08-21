@@ -1,34 +1,43 @@
 const userModel = require("../models/user.model");
 const jwt = require("jsonwebtoken");
+const emailService=require("../services/email.service")
+
 async function userRegisterController(req, res) {
     const { email, password, name } = req.body;
 
     const isExits = await userModel.findOne({
         email: email
     });
-
     if (isExits) {
         return res.status(422).json({
             message: "User already exists with email.",
             status: "failed"
         });
     }
-
     const user = await userModel.create({
         email,
         password,
         name
     });
-
-    // User is created, now generate JWT token
     const token = jwt.sign(
         { userId: user._id },
         process.env.JWT_SECRET,
         { expiresIn: "3d" }
     );
-
     res.cookie("token", token);
 
+    // Send registration email
+
+    // Send registration email
+// console.log("About to send email...");
+// console.log("Email:", user.email);
+// console.log("Name:", user.name);
+
+
+    await emailService.sendRegistrationEmail(
+        user.email,
+        user.name
+    );
     return res.status(201).json({
         user: {
             _id: user._id,
@@ -38,7 +47,6 @@ async function userRegisterController(req, res) {
         token
     });
 }
-
 /**
  * -USer Login Controller
  * POST/api/auth/login
