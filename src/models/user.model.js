@@ -1,7 +1,5 @@
 const mongoose = require("mongoose");
 const bcrypt=require("bcryptjs")
-
-
 const userSchema = new mongoose.Schema(
   {
     email: {
@@ -27,7 +25,15 @@ const userSchema = new mongoose.Schema(
       minlength: [6, "Password should contain more than 6 characters"],
       select: false,
     },
-  },
+
+ 
+  systemUser:{
+    type:Boolean,
+    default:false,
+    immutable:true,
+    select:false
+  }
+   },
   {
     timestamps: true,
   }
@@ -42,10 +48,8 @@ userSchema.pre("save",async function(){
     return
 })
 // this will compare the passowrd stored in DB and the passwoed entet by the user
-
 userSchema.methods.comparePassword= async function(password){
     return await bcrypt.compare(password,this.password)
-
 }
 const userModel=mongoose.model("user",userSchema)
 module.exports=userModel
