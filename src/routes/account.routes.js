@@ -1,10 +1,38 @@
-const express=require("express")
-const authMiddleware=require("../middleware/auth.middleware")
-const accountController=require("../controllers/account.controller")
+const express = require("express");
 
-const router=express.Router()
+const authMiddleware = require("../middleware/auth.middleware");
 
-router.post("/",authMiddleware.authMiddleware,accountController.createAccountController)
+const accountController = require("../controllers/account.controller");
+
+const router = express.Router();
 
 
-module.exports=router
+// Create Account
+// POST /api/accounts
+
+router.post(
+    "/",
+    authMiddleware.authMiddleware,
+    accountController.createAccountController
+);
+
+
+// Get User Accounts
+// GET /api/accounts
+
+router.get(
+    "/",
+    authMiddleware.authMiddleware,
+    accountController.getUserAccountsController
+);
+/**
+ * get/api/accounts/balance/:accountTD
+ 
+ */ 
+router.get("/balance/:accountId",authMiddleware.authMiddleware,accountController.getAccountBalanceController);
+
+
+
+
+
+module.exports = router;
