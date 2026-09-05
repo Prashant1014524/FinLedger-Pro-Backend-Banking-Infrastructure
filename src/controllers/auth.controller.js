@@ -13,6 +13,13 @@ async function userRegisterController(req, res) {
 
     const { email, password, name } = req.body;
 
+    if (!email || !password || !name) {
+        return res.status(400).json({
+            message: "Email, password, and name are required",
+            status: "failed"
+        });
+    }
+
     // Check if user already exists
     const isExits = await userModel.findOne({
         email: email
@@ -46,11 +53,15 @@ async function userRegisterController(req, res) {
     // Store token in cookie
     res.cookie("token", token);
 
-    // Send registration email
-    await emailService.sendRegistrationEmail(
-        user.email,
-        user.name
-    );
+    // Send registration email (non-blocking failure)
+    try {
+        await emailService.sendRegistrationEmail(
+            user.email,
+            user.name
+        );
+    } catch (emailErr) {
+        console.error("Failed to send welcome email:", emailErr.message);
+    }
 
     // Send response
     return res.status(201).json({
@@ -72,6 +83,12 @@ async function userRegisterController(req, res) {
 async function userLoginController(req, res) {
 
     const { email, password } = req.body;
+
+    if (!email || !password) {
+        return res.status(400).json({
+            message: "Email and password are required"
+        });
+    }
 
     // Find user
     // +password because password has select:false
@@ -238,10 +255,12 @@ async function userLogoutController(req, res) {
     }
 
 
-    // Add token to blacklist
-    await tokenBlackListModel.create({
-        token: token
-    });
+    // Add token to blacklist (safely upsert to prevent E11000 duplicate key error)
+    await tokenBlackListModel.updateOne(
+        { token: token },
+        { token: token },
+        { upsert: true }
+    );
 
 
     // Clear cookie

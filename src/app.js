@@ -15,9 +15,19 @@ const transactionRoutes=require("./routes/transaction.routes")
 app.get("/",(req,res)=>{
     res.send("Ledger Service is up and running")
 })
-app.use("/api/auth",authRouter) //jin bhi api ka end point /api/auth hit hoga sb authroute.js pr route hongi
-app.use("/api/accounts",accountRouter)
-app.use("/api/transactions",transactionRoutes)
-module.exports=app
+app.use("/api/auth", authRouter)
+app.use("/api/accounts", accountRouter)
+app.use("/api/transactions", transactionRoutes)
+
+// Centralized error handling middleware
+app.use((err, req, res, next) => {
+    console.error("Global Error Handler caught:", err);
+    res.status(err.status || 500).json({
+        message: err.message || "Internal Server Error",
+        status: "error"
+    });
+});
+
+module.exports = app
 
 

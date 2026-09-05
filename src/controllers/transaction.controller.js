@@ -3,6 +3,17 @@ const ledgerModel = require("../models/ledger.model")
 const accountModel = require("../models/account.model")
 const emailService = require("../services/email.service")
 const mongoose = require("mongoose")
+const { redisClient, isRedisConnected } = require("../config/redis")
+
+async function invalidateBalanceCache(accountIds) {
+    if (!isRedisConnected() || !redisClient || !accountIds.length) return;
+    try {
+        const cacheKeys = accountIds.map(id => `balance:${id}`);
+        await redisClient.del(...cacheKeys);
+    } catch (err) {
+        console.warn("Failed to invalidate Redis balance cache:", err.message);
+    }
+}
 
 /**
  * - Create a new transaction
@@ -29,6 +40,18 @@ async function createTransaction(req, res) {
     if (!fromAccount || !toAccount || !amount || !idempotencyKey) {
         return res.status(400).json({
             message: "FromAccount, toAccount, amount and idempotencyKey are required"
+        })
+    }
+
+    if (fromAccount === toAccount) {
+        return res.status(400).json({
+            message: "fromAccount and toAccount cannot be the same account"
+        })
+    }
+
+    if (amount <= 0) {
+        return res.status(400).json({
+            message: "Transaction amount must be greater than 0"
         })
     }
 
@@ -60,7 +83,6 @@ async function createTransaction(req, res) {
                 message: "Transaction already processed",
                 transaction: isTransactionAlreadyExists
             })
-
         }
 
         if (isTransactionAlreadyExists.status === "PENDING") {
@@ -104,13 +126,12 @@ async function createTransaction(req, res) {
     }
 
     let transaction;
+    let session;
     try {
-
-
         /**
-         * 5. Create transaction (PENDING)
+         * 5. Create transaction (PENDING) inside session
          */
-        const session = await mongoose.startSession()
+        session = await mongoose.startSession()
         session.startTransaction()
 
         transaction = (await transactionModel.create([ {
@@ -121,18 +142,14 @@ async function createTransaction(req, res) {
             status: "PENDING"
         } ], { session }))[ 0 ]
 
-        const debitLedgerEntry = await ledgerModel.create([ {
+        await ledgerModel.create([ {
             account: fromAccount,
             amount: amount,
             transaction: transaction._id,
             type: "DEBIT"
         } ], { session })
 
-        await (() => {
-            return new Promise((resolve) => setTimeout(resolve, 15 * 1000));
-        })()
-
-        const creditLedgerEntry = await ledgerModel.create([ {
+        await ledgerModel.create([ {
             account: toAccount,
             amount: amount,
             transaction: transaction._id,
@@ -145,20 +162,32 @@ async function createTransaction(req, res) {
             { session }
         )
 
-
         await session.commitTransaction()
         session.endSession()
+
+        // Invalidate Redis balance cache for both accounts
+        await invalidateBalanceCache([fromAccount, toAccount]);
     } catch (error) {
-
-        return res.status(400).json({
-            message: "Transaction is Pending due to some issue, please retry after sometime",
+        if (session) {
+            await session.abortTransaction()
+            session.endSession()
+        }
+        return res.status(500).json({
+            message: "Transaction processing failed, please retry",
+            error: error.message
         })
-
     }
+
     /**
-     * 10. Send email notification
+     * 10. Send email notification (non-blocking failure)
      */
-    await emailService.sendTransactionEmail(req.user.email, req.user.name, amount, toAccount)
+    try {
+        if (req.user && req.user.email) {
+            await emailService.sendTransactionEmail(req.user.email, req.user.name, amount, toAccount)
+        }
+    } catch (emailError) {
+        console.error("Email notification failed:", emailError.message)
+    }
 
     return res.status(201).json({
         message: "Transaction completed successfully",
@@ -173,6 +202,12 @@ async function createInitialFundsTransaction(req, res) {
     if (!toAccount || !amount || !idempotencyKey) {
         return res.status(400).json({
             message: "toAccount, amount and idempotencyKey are required"
+        })
+    }
+
+    if (amount <= 0) {
+        return res.status(400).json({
+            message: "Transaction amount must be greater than 0"
         })
     }
 
@@ -196,44 +231,60 @@ async function createInitialFundsTransaction(req, res) {
         })
     }
 
+    let session;
+    let transaction;
+    try {
+        session = await mongoose.startSession()
+        session.startTransaction()
 
-    const session = await mongoose.startSession()
-    session.startTransaction()
+        transaction = (await transactionModel.create([ {
+            fromAccount: fromUserAccount._id,
+            toAccount,
+            amount,
+            idempotencyKey,
+            status: "PENDING"
+        } ], { session }))[ 0 ]
 
-    const transaction = new transactionModel({
-        fromAccount: fromUserAccount._id,
-        toAccount,
-        amount,
-        idempotencyKey,
-        status: "PENDING"
-    })
+        await ledgerModel.create([ {
+            account: fromUserAccount._id,
+            amount: amount,
+            transaction: transaction._id,
+            type: "DEBIT"
+        } ], { session })
 
-    const debitLedgerEntry = await ledgerModel.create([ {
-        account: fromUserAccount._id,
-        amount: amount,
-        transaction: transaction._id,
-        type: "DEBIT"
-    } ], { session })
+        await ledgerModel.create([ {
+            account: toAccount,
+            amount: amount,
+            transaction: transaction._id,
+            type: "CREDIT"
+        } ], { session })
 
-    const creditLedgerEntry = await ledgerModel.create([ {
-        account: toAccount,
-        amount: amount,
-        transaction: transaction._id,
-        type: "CREDIT"
-    } ], { session })
+        await transactionModel.findOneAndUpdate(
+            { _id: transaction._id },
+            { status: "COMPLETED" },
+            { session }
+        )
 
-    transaction.status = "COMPLETED"
-    await transaction.save({ session })
+        await session.commitTransaction()
+        session.endSession()
 
-    await session.commitTransaction()
-    session.endSession()
+        // Invalidate Redis balance cache for system account and target account
+        await invalidateBalanceCache([fromUserAccount._id, toAccount]);
+    } catch (error) {
+        if (session) {
+            await session.abortTransaction()
+            session.endSession()
+        }
+        return res.status(500).json({
+            message: "Initial funds transaction failed",
+            error: error.message
+        })
+    }
 
     return res.status(201).json({
         message: "Initial funds transaction completed successfully",
         transaction: transaction
     })
-
-
 }
 
 module.exports = {

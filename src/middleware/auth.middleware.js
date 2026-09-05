@@ -1,6 +1,6 @@
 const userModel = require("../models/user.model");
 const jwt = require("jsonwebtoken");
-const tokenBlackListModel=require("../models/account.model")
+const tokenBlackListModel = require("../models/tokenBlacklist.model");
 
 // ======================================================
 // NORMAL USER AUTHENTICATION
@@ -21,14 +21,12 @@ async function authMiddleware(req, res, next) {
         });
 
     }
-    const isBlacklisted=await tokenBlackListModel.findOne({token})
-    if(isBlacklisted){
+    const isBlacklisted = await tokenBlackListModel.findOne({ token });
+    if (isBlacklisted) {
         return res.status(401).json({
-            message:"Unauthorized access,token is invalid"
-        })
+            message: "Unauthorized access, token is invalid"
+        });
     }
-
-
 
     try {
 
